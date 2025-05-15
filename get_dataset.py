@@ -13,30 +13,28 @@ def parse_cla():
     return parser.parse_args()
 
 
-def dataset_dict(content:str, summary:str) -> Dict:
+def dataset_dict(input:str, output:str) -> Dict:
     """
-    takes a input and a summary and concatenates together with 
-    stanford alpaca syntax for summarization
 
     keyword arguments:
-    content -- content which should be summarized
-    summary -- summary of the content
+    input -- User input text
+    output -- Model output text
     """
-    input_txt = f"### Instruction \nWrite a concise summary of the following text \n### Input \n{content}"
-    output_txt = f"### Output {summary}"
-    return {"prompt": input_txt, "completion": output_txt}
+    input_txt = f"### Instruction \n请回答以下法律问题 \n### Input \n{input}"
+    output_txt = f"### Output {output}"
+    return {"prompt": input_txt, "Output": output_txt}
 
 
 def load_dataset() -> Type[datasets.Dataset]:
     """returns tldr dataset"""
-    return datasets.load_dataset("webis/tldr-17", split="train[:2%]",trust_remote_code=True)
+    return datasets.load_dataset("Kuugo/chinese_law_ft_dataset",split='train',trust_remote_code=True)
 
 
 def save_list(tldr_dataset:Type[datasets.Dataset]) -> List:
     """saves list of dataset dictionaries"""
     save_list = []
     for text_dict in tqdm(tldr_dataset["train"]):
-        prompt = dataset_dict(content=text_dict["content"],  summary=text_dict["summary"])
+        prompt = dataset_dict(input=text_dict["instruction"],  output=text_dict["output"])
         save_list.append(prompt)
     return save_list
 
