@@ -36,7 +36,7 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    dataset_path_name: str = "webis/tldr-17"
+    dataset_path_name: str = "sft_data"
     num_proc:int = 4
 
 
@@ -48,6 +48,7 @@ def load_model(model_name:str):
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
         attn_implementation=ModelArguments.attn_implementation,
+        cache_dir=ModelArguments.cache_dir,
     )
     model.config.use_cache = False
     model.train()
@@ -56,12 +57,6 @@ def load_model(model_name:str):
 def build_instruction_dataset(dataset_path_name:str, num_proc:int):
     assert os.path.exists(dataset_path_name)
     dataset = datasets.load_dataset(dataset_path_name)
-    dataset = dataset.map(
-        lambda x: {
-            "input": f"### Instruction \nWrite a concise summary of the following text \n### Input \n{x['content']}",
-            "output": f"### Output {x['summary']}"
-        },
-        num_proc=num_proc,
-        remove_columns=["content", "summary"],
-    )
+    
+    
     return dataset
