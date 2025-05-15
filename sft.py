@@ -58,6 +58,9 @@ class ModelArguments:
 class DataArguments:
     dataset_path_name: str = "sft_data"
     num_proc:int = 4
+    val_ratio:float = 0.1
+    max_train_samples:int = 1000
+    max_eval_samples:int = 100
 
 @dataclass
 class TrainingArguments(TrainingArguments):
@@ -123,12 +126,67 @@ def find_all_linear_names(peft_model, int4=False, int8=False):
             names = name.split('.')
             lora_module_names.add(names[0] if len(names) == 1 else names[-1])
     return sorted(lora_module_names)
-def build_instruction_dataset(dataset_path_name:str, num_proc:int):
+def build_dataset(
+        dataset_path_name:str,
+        tokenizer:AutoTokenizer,
+        num_proc:int,
+        model_max_length: int,
+        seed:int=42,
+        val_ratio:float=0.1,
+
+):
+    '''prompt template:
+        <|im_start|>system
+        请回答以下法律问题:<|im_end|>
+        <|im_start|>user
+        如果被告人不服判决，有什么权利？<|im_end|>
+        <|im_start|>assistant
+        根据《刑事诉讼法》第294条，被告人或其近亲属不服判决的，有权向上一级人民法院上诉。辩护人经被告人或者其近亲属同意，也可以提出上诉。因此，被告人可以通过上诉的方式表达其对判决的不满。<|im_end|>
+
+    '''
     assert os.path.exists(dataset_path_name)
-    dataset = datasets.load_dataset(dataset_path_name)
-    
-    
-    return dataset
+    dataset = datasets.load_from_disk(dataset_path_name)
+    dataset.shuffle(seed=seed)
+    def process_function(examples):
+        instruction=(f"<|im_start|>system\n请回答以下法律问题:<|im_end|>\n<|im_start|>user"
+                     f"\n{examples['instruction']+examples['input']}<|im_end|>\n<|im_start|>assistant\n")
+        instruction=tokenizer(instruction,add_special_tokens=False)
+        response=tokenizer(f"{examples['output']}",add_special_tokens=False)
+        input_ids = instruction["input_ids"] + response["input_ids"] + [tokenizer.eos_token_id]
+        attention_mask = instruction["attention_mask"] + response["attention_mask"] + [tokenizer.eos_token_id]
+        labels = [-100] * len(instruction["input_ids"]) + response["input_ids"] + [tokenizer.eos_token_id]
+        if len(input_ids) > model_max_length:
+            input_ids = input_ids[:model_max_length]
+            attention_mask = attention_mask[:model_max_length]
+            labels = labels[:model_max_length]
+        result={
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
+        return result
+
+    assert val_ratio>=0 and val_ratio<=0.4
+    split_dataset = dataset.train_test_split(
+        test_size=val_ratio,
+        seed=seed,
+        shuffle=True
+    )
+    train_dataset = split_dataset["train"].map(
+        process_function,
+        num_proc=num_proc,
+    )
+    train_dataset=train_dataset.map(remove_columns=split_dataset["train"].column_names).filter(lambda x: len(x["input_ids"]) <= model_max_length,num_proc=num_proc)
+
+    eval_dataset = split_dataset["test"].map(
+        process_function,
+        num_proc=num_proc
+    )
+    eval_dataset=eval_dataset.map(remove_columns=split_dataset["test"].column_names).filter(lambda x: len(x["input_ids"]) <= model_max_length,num_proc=num_proc)
+
+    train_dataset=train_dataset.shuffle(seed=seed)
+    eval_dataset=eval_dataset.shuffle(seed=seed)
+    return {"train":train_dataset, "eval":eval_dataset}
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataArguments, TrainingArguments, LoraArguments))
@@ -149,6 +207,18 @@ def main():
         inference_mode=False
     )
     print(f"lora config:{lora_args}")
-    model=get_peft_model(model,lora_config)
+
+    dataset_dict=build_dataset(data_args.dataset_path_name,tokenizer=tokenizer,val_ratio=data_args.val_ratio,
+                  num_proc=data_args.num_proc,model_max_length=model_args.model_max_length,
+                  )
+    train_dataset=dataset_dict["train"]
+    eval_dataset=dataset_dict["eval"]
+    max_train_samples=min(len(train_dataset),data_args.max_train_samples)
+    max_eval_samples=min(len(eval_dataset),data_args.max_eval_samples)
+    train_dataset=train_dataset.select(range(max_train_samples))
+    eval_dataset=eval_dataset.select(range(max_eval_samples))
+
+    model = get_peft_model(model, lora_config)
+
 if __name__ == '__main__':
     main()
