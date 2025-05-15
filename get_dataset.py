@@ -1,3 +1,5 @@
+import  os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 from pathlib import Path
 from tqdm import tqdm
 import json
@@ -29,6 +31,8 @@ def main():
     args = parse_cla()
     dataset = load_dataset()
     save_path=args.save_path
+    print(dataset['train'][:10])
+    dataset=dataset['train']
     dataset.save_to_disk(save_path)
 
 
