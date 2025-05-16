@@ -2,6 +2,7 @@ import os
 os.environ['HF_ENDPOINT']='https://hf-mirror.com'
 from loguru import logger
 import math
+from typing import Literal, Optional, Tuple
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import datasets
@@ -69,7 +70,7 @@ class TrainingArguments(TrainingArguments):
     output_dir = "./output/Qwen2.5-1.5B"
     per_device_train_batch_size:int = 4
     per_device_eval_batch_size:int = 4
-    gradient_accumulation_steps:int = 4
+    gradient_accumulation_steps:int = 1
     logging_steps:int = 10
     num_train_epochs:int = 3
     save_steps:int = 100
@@ -79,7 +80,7 @@ class TrainingArguments(TrainingArguments):
 class LoraArguments:
     task_type = TaskType.CAUSAL_LM
     target_model:str="all"
-    r:int=16
+    rank:int=16
     lora_alpha:int=32
     lora_dropout:float=0
 
@@ -208,11 +209,17 @@ def main():
     )
 
     model = load_model(model_args)
+    output_layer = getattr(model, "lm_head")
+    if isinstance(output_layer, torch.nn.Linear) and output_layer.weight.dtype != torch.float32:
+        def fp32_forward_post_hook(module: torch.nn.Module, args: Tuple[torch.Tensor], output: torch.Tensor):
+            return output.to(torch.float32)
+
+        output_layer.register_forward_hook(fp32_forward_post_hook)
     lora_args.target_model = find_all_linear_names(peft_model=model,int4=model_args.load_in_4bit,int8=model_args.load_in_8bit)
-    lora_config=LoraConfig(
+    peft_config=LoraConfig(
         task_type=lora_args.task_type,
         target_modules=lora_args.target_model,
-        r=lora_args.r,
+        r=lora_args.rank,
         lora_alpha=lora_args.lora_alpha,
         lora_dropout=lora_args.lora_dropout,
         inference_mode=False
@@ -229,7 +236,20 @@ def main():
         train_dataset=train_dataset.select(range(max_train_samples))
         eval_dataset=eval_dataset.select(range(max_eval_samples))
 
-    model = get_peft_model(model, lora_config)
+    model = get_peft_model(model, peft_config)
+    for param in filter(lambda p: p.requires_grad, model.parameters()):
+        param.data = param.data.to(torch.float32)
+
+    # Initialize our Trainer
+    if training_args.gradient_checkpointing and getattr(model, "supports_gradient_checkpointing", False):
+        model.gradient_checkpointing_enable()
+        model.config.use_cache = False
+        logger.info("Gradient checkpointing enabled.")
+    else:
+        model.config.use_cache = True
+        logger.info("Gradient checkpointing disabled.")
+    model.enable_input_require_grads()
+    logger.info(f"model trainable information:")
 
     data_collator = DataCollatorForSeq2Seq(
         tokenizer=tokenizer,
