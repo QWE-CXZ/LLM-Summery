@@ -25,9 +25,10 @@ torchrun --nproc_per_node 1 \
     --logging_strategy "steps" \
     --logging_steps 10 \
     --eval_steps 50 \
+    --eval_strategy "steps"\
     --bf16 \
     --report_to tensorboard\
     --cache_dir "Qwen_model_file"\
     --rank 16 \
     --lora_alpha 32 \
-    --lora_dropout 0.05 \
+    --lora_dropout 0.05
