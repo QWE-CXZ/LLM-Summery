@@ -2,3 +2,4 @@ transformers
 peft
 datasets
 accelerate
+loguru

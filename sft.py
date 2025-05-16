@@ -1,12 +1,13 @@
 import os
 os.environ['HF_ENDPOINT']='https://hf-mirror.com'
+from loguru import logger
+import math
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import datasets
 from dataclasses import dataclass
 
 from typing import Optional, List, Dict,Literal,Type
-from accelerate import Accelerator
 from transformers.trainer_pt_utils import LabelSmoother
 import os
 from tqdm import tqdm
@@ -14,6 +15,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
     HfArgumentParser,
+    DataCollatorForSeq2Seq,
 )
 from peft import (
     TaskType,
@@ -21,7 +23,7 @@ from peft import (
     get_peft_model,
     PeftModel,
 )
-from transformers.data.data_collator import DataCollatorWithFlattening
+from accelerate import PartialState
 from datasets import Dataset,concatenate_datasets
 
 is_flash_attn_2_available = False
@@ -154,7 +156,7 @@ def build_dataset(
         response=tokenizer(f"{examples['output']}",add_special_tokens=False)
         input_ids = instruction["input_ids"] + response["input_ids"] + [tokenizer.eos_token_id]
         attention_mask = instruction["attention_mask"] + response["attention_mask"] + [tokenizer.eos_token_id]
-        labels = [-100] * len(instruction["input_ids"]) + response["input_ids"] + [tokenizer.eos_token_id]
+        labels = [IGNORE_INDEX] * len(instruction["input_ids"]) + response["input_ids"] + [tokenizer.eos_token_id]
         if len(input_ids) > model_max_length:
             input_ids = input_ids[:model_max_length]
             attention_mask = attention_mask[:model_max_length]
@@ -187,6 +189,15 @@ def build_dataset(
     train_dataset=train_dataset.shuffle(seed=seed)
     eval_dataset=eval_dataset.shuffle(seed=seed)
     return {"train":train_dataset, "eval":eval_dataset}
+def save_model(model, tokenizer, args):
+    """Save the model and the tokenizer."""
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Take care of distributed/parallel training
+    model_to_save = model.module if hasattr(model, "module") else model
+    model_to_save.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataArguments, TrainingArguments, LoraArguments))
@@ -206,19 +217,61 @@ def main():
         lora_dropout=lora_args.lora_dropout,
         inference_mode=False
     )
-    print(f"lora config:{lora_args}")
-
-    dataset_dict=build_dataset(data_args.dataset_path_name,tokenizer=tokenizer,val_ratio=data_args.val_ratio,
-                  num_proc=data_args.num_proc,model_max_length=model_args.model_max_length,
-                  )
-    train_dataset=dataset_dict["train"]
-    eval_dataset=dataset_dict["eval"]
-    max_train_samples=min(len(train_dataset),data_args.max_train_samples)
-    max_eval_samples=min(len(eval_dataset),data_args.max_eval_samples)
-    train_dataset=train_dataset.select(range(max_train_samples))
-    eval_dataset=eval_dataset.select(range(max_eval_samples))
+    logger.info(f"lora config:{lora_args}")
+    with PartialState().local_main_process_first():
+        dataset_dict=build_dataset(data_args.dataset_path_name,tokenizer=tokenizer,val_ratio=data_args.val_ratio,
+                      num_proc=data_args.num_proc,model_max_length=model_args.model_max_length,
+                      )
+        train_dataset=dataset_dict["train"]
+        eval_dataset=dataset_dict["eval"]
+        max_train_samples=min(len(train_dataset),data_args.max_train_samples)
+        max_eval_samples=min(len(eval_dataset),data_args.max_eval_samples)
+        train_dataset=train_dataset.select(range(max_train_samples))
+        eval_dataset=eval_dataset.select(range(max_eval_samples))
 
     model = get_peft_model(model, lora_config)
+
+    data_collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer,
+        model=model,
+        label_pad_token_id=IGNORE_INDEX,
+    )
+    trainer=Trainer(
+        model=model,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        args=training_args
+    )
+    if trainer.is_world_process_zero():
+        logger.info("training")
+    train_results = trainer.train(
+        resume_from_checkpoint=training_args.resume_from_checkpoint if training_args.resume_from_checkpoint else None
+    )
+    metrics = train_results.metrics
+    metrics["train_samples"] = max_train_samples
+    trainer.log_metrics("train", metrics)
+    trainer.save_metrics("train", metrics)
+    trainer.save_state()
+    if trainer.is_world_process_zero():
+        logger.info(f"Training metrics: {metrics}")
+        logger.info(f"Saving model checkpoint to {training_args.output_dir}")
+        save_model(model, tokenizer, training_args)
+
+    if trainer.is_world_process_zero():
+        logger.info("evaluating")
+    metrics_eval = trainer.evaluate(metric_key_prefix="eval")
+    metrics_eval["eval_samples"] = max_eval_samples
+    try:
+        perplexity = math.exp(metrics_eval["eval_loss"])
+    except OverflowError:
+        perplexity = float("inf")
+    metrics_eval["perplexity"] = perplexity
+    trainer.log_metrics("eval", metrics_eval)
+    trainer.save_metrics("eval", metrics_eval)
+    if trainer.is_world_process_zero():
+        logger.info(f"evaluation metrics: {metrics_eval}")
 
 if __name__ == '__main__':
     main()
