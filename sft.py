@@ -75,7 +75,7 @@ class TrainingArguments(TrainingArguments):
     num_train_epochs:int = 3
     save_steps:int = 100
     learning_rate:float = 1e-4
-    gradient_checkpointing:bool = True
+    gradient_checkpointing:bool = False
 @dataclass
 class LoraArguments:
     task_type = TaskType.CAUSAL_LM
@@ -209,12 +209,12 @@ def main():
     )
 
     model = load_model(model_args)
-    output_layer = getattr(model, "lm_head")
-    if isinstance(output_layer, torch.nn.Linear) and output_layer.weight.dtype != torch.float32:
-        def fp32_forward_post_hook(module: torch.nn.Module, args: Tuple[torch.Tensor], output: torch.Tensor):
-            return output.to(torch.float32)
+    # output_layer = getattr(model, "lm_head")
+    # if isinstance(output_layer, torch.nn.Linear) and output_layer.weight.dtype != torch.float32:
+    #     def fp32_forward_post_hook(module: torch.nn.Module, args: Tuple[torch.Tensor], output: torch.Tensor):
+    #         return output.to(torch.float32)
 
-        output_layer.register_forward_hook(fp32_forward_post_hook)
+    #     output_layer.register_forward_hook(fp32_forward_post_hook)
     lora_args.target_model = find_all_linear_names(peft_model=model,int4=model_args.load_in_4bit,int8=model_args.load_in_8bit)
     peft_config=LoraConfig(
         task_type=lora_args.task_type,
@@ -240,20 +240,18 @@ def main():
     for param in filter(lambda p: p.requires_grad, model.parameters()):
         param.data = param.data.to(torch.float32)
 
-    # Initialize our Trainer
-    if training_args.gradient_checkpointing and getattr(model, "supports_gradient_checkpointing", False):
-        model.gradient_checkpointing_enable()
-        model.config.use_cache = False
-        logger.info("Gradient checkpointing enabled.")
-    else:
-        model.config.use_cache = True
-        logger.info("Gradient checkpointing disabled.")
+    # # Initialize our Trainer
+    # if training_args.gradient_checkpointing and getattr(model, "supports_gradient_checkpointing", False):
+    #     model.gradient_checkpointing_enable()
+    #     model.config.use_cache = False
+    #     logger.info("Gradient checkpointing enabled.")
+    # else:
+    #     model.config.use_cache = True
+    #     logger.info("Gradient checkpointing disabled.")
     model.enable_input_require_grads()
-    logger.info(f"model trainable information:")
 
     data_collator = DataCollatorForSeq2Seq(
         tokenizer=tokenizer,
-        model=model,
         label_pad_token_id=IGNORE_INDEX,
     )
     trainer=Trainer(
