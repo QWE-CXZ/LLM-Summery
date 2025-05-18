@@ -1,4 +1,4 @@
-import  os
+import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 from pathlib import Path
 from tqdm import tqdm
@@ -26,13 +26,30 @@ def load_dataset() -> Type[datasets.Dataset]:
 #             json.dump(json_dict, opened_jsonl)
 #             opened_jsonl.write("\n")
 
-
+def dataset_filter(dataset: datasets.Dataset) -> datasets.Dataset:
+    def filt_by_law(example):
+        ins_len = len(example['instruction']) + len(example['input'])
+        if ins_len > 500:
+            return False
+        splited = example['output'].split("《")
+        if len(splited) > 2 or len(splited) < 2:
+            return False
+        law = splited[1]
+        if "刑法" not in law:
+            return False
+        if "修正" in law:
+            return False
+        return True
+    dataset=dataset.filter(filt_by_law)
+    return dataset
 def main():
     args = parse_cla()
     dataset = load_dataset()
     save_path=args.save_path
     print(dataset['train'][:10])
     dataset=dataset['train']
+    dataset=dataset_filter(dataset)
+    dataset=dataset.select(range(12000))
     dataset.save_to_disk(save_path)
 
 
