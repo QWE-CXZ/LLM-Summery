@@ -209,6 +209,9 @@ def main():
     )
 
     model = load_model(model_args)
+    if training_args.gradient_checkpointing:
+        print("gradient_checkpointing")
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant":False})
     # output_layer = getattr(model, "lm_head")
     # if isinstance(output_layer, torch.nn.Linear) and output_layer.weight.dtype != torch.float32:
     #     def fp32_forward_post_hook(module: torch.nn.Module, args: Tuple[torch.Tensor], output: torch.Tensor):
