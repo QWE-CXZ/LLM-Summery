@@ -8,7 +8,7 @@ torchrun --nproc_per_node 2 \
     --max_eval_samples 500 \
     --optim "adamw_torch" \
     --learning_rate 2e-5 \
-    --output_dir "./output/Qwen2.5-1.5B-try" \
+    --output_dir "./output/Qwen2.5-1.5B" \
     --per_device_train_batch_size 8 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
