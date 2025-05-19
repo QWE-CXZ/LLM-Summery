@@ -15,7 +15,6 @@ from transformers import (
 
 class SmartDocumentProcessor:
     def __init__(self):
-        # 初始化嵌入模型，使用HuggingFace的BAAI/bge-small-zh-v1.5模型-这个模型专为RAG而生
         self.embed_model = HuggingFaceEmbeddings(
             model_name="BAAI/bge-small-zh-v1.5",
             model_kwargs={"device": "cuda"},
@@ -77,7 +76,7 @@ class HybridRetriever:
 
         self.bm25_retriever = BM25Retriever.from_documents(
             chunks,
-            k=5  # 初始检索数量多于最终需要
+            k=5  
         )
 
         self.ensemble_retriever = EnsembleRetriever(
