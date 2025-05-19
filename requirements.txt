@@ -4,3 +4,10 @@ datasets
 accelerate
 loguru
 deepspeed
+langchain
+langchain_community
+sentence-transformers
+langchain_experimental
+chromadb
+pypdf
+unstructured[pdf]
