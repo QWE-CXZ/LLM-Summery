@@ -56,7 +56,7 @@ class SmartDocumentProcessor:
                     chunk_size=384, chunk_overlap=96)
             else:
                 splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=256, chunk_overlap=36)
+                    chunk_size=128, chunk_overlap=24)
             final_chunks.extend(splitter.split_documents([chunk]))
         for i, chunk in enumerate(final_chunks):
             chunk.metadata.update({
@@ -84,7 +84,7 @@ class HybridRetriever:
                 self.vector_db.as_retriever(search_kwargs={"k": 5}),
                 self.bm25_retriever
             ],
-            weights=[0.6, 0.4]
+            weights=[0.3, 0.7]
         )
 
         self.reranker = CrossEncoder(
@@ -134,7 +134,16 @@ class EnhancedRAG:
             f"[来源：{doc.metadata['source']}，类型：{doc.metadata['content_type']}]\n{doc.page_content}"
             for doc in contexts
         ])
-        instruction=f"请基于法律条文内容:{context_str}，用中文回答以下法律问题："
+        instruction = (
+            "你是一名专业法律助手，请严格根据以下刑法条文依据进行分析,不要违背以下刑法依据：\n\n"
+            f"{'#'*7}\n".join(context_str) + "\n\n"
+            "回答要求：\n"
+            "1. 准确引用刑法法律条文\n"
+            "2. 分析案件与法条的对应关系\n"
+            "3. 结论明确，使用法律术语\n"
+            "请按照上述要求回答以下法律问题："
+        )
+
         prompt = [
             {
                 "role": "system", "content": instruction},
@@ -144,7 +153,7 @@ class EnhancedRAG:
         return prompt
 
     def ask(self, question):
-        contexts = self.retriever.retrieve(question,top_k=2)
+        contexts = self.retriever.retrieve(question,top_k=3)
 
         messages = self.generate_prompt(question, contexts)
 
