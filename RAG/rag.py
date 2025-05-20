@@ -127,8 +127,6 @@ class EnhancedRAG:
             trust_remote_code=True,
         )
 
-        torch.manual_seed(42)
-
         self.model.eval()
 
     def generate_prompt(self, question, contexts):
@@ -136,8 +134,7 @@ class EnhancedRAG:
             f"[来源：{doc.metadata['source']}，类型：{doc.metadata['content_type']}]\n{doc.page_content}"
             for doc in contexts
         ])
-        print(context_str)
-        instruction=f"请基于以下法律条文内容{context_str}，用中文回答以下法律问题："
+        instruction=f"请基于法律条文内容:{context_str}，用中文回答以下法律问题："
         prompt = [
             {
                 "role": "system", "content": instruction},
@@ -147,7 +144,7 @@ class EnhancedRAG:
         return prompt
 
     def ask(self, question):
-        contexts = self.retriever.retrieve(question)
+        contexts = self.retriever.retrieve(question,top_k=2)
 
         messages = self.generate_prompt(question, contexts)
 
@@ -169,11 +166,11 @@ def main():
     model_name_or_path = "../sft_merged_model"
     #cache_dir="../Qwen_model_file"
     rag = EnhancedRAG(model_name_or_path)
-    question1="请根据基本案情，给出适用的法条。基本案情：经审理查明，2017年6月7日20时许，在长春市绿园区西新镇开元村小东沟屯吕某某、王桂荣家东屋，因琐事产生争执后，被告人王桂荣用手将被害人户某某推倒在地，致户某某右股骨粉碎性骨折。经长春市司法鉴定中心鉴定：户某某外伤致右股骨粉碎性骨折构成轻伤一级。2017年8月9日，民警在长春市绿园区西新镇开元村小东沟屯王桂荣家将王桂荣传唤到派出所。上述事实，被告人王桂荣在开庭审理过程中无异议，并有被告人王桂荣在侦查机关的供述、被害人户某某的陈述、证人于某某的证言、受案登记表及立案决定书、到案经过、户籍证明、指认现场笔录及照片、长春市公安司法鉴定中心法医学人体损伤程度鉴定意见书等证据证实，足以认定。"
-    question2="以下情况是否属于刑事犯罪？一名人员在公共场合醉酒滋事，损坏公共财物。"
-    question3="小明在街头摆摊贩卖一些明显是盗版的电影光盘，属于侵犯著作权行为吗？"
-    question4="某政府部门的工作人员在办理某企业的审批手续时，向该企业索要了一定财物，以此为由加快审批进度。根据我国《刑法》相关规定，这名工作人员是否构成受贿罪？"
-    question5="李某是一名国家工作人员，在履行公务期间窃取了国家机密并逃往了美国，如何处罚他？"
+    question1="崔某作为个体工商户，在税务人员征税过程中采取暴力抗拒行为，并故意将热油泼向围观群众，导致一名群众重伤。请问上述行为是否构成故意伤害罪？请给出详细的推理过程之后再给出答案。"
+    question2="小明冒用了别人的信用卡进行消费，数额较大，是否构成信用卡诈骗罪？"
+    question3="某公司将大量液态废物走私进境，企图从中获取不当利益。海关查获后，该公司及其负责主管人员被起诉。对于该公司及其负责主管人员，按照什么规定处罚走私液态废物的行为？"
+    question4="小明是某银行的员工，他利用职务上的便利，收受客户回扣，将钱财占为己有。小明的行为构成什么罪？应该如何处罚？"
+    question5="甲公司为了获取国有企业A的业务，在接触中向A公司领导的亲戚赠送大量礼物，后甲公司成功获得A公司的业务。根据相关法律法规，甲公司是否已经违法？"
     prompt=[question1,question2,question3,question4,question5]
     for i in range(len(prompt)):
         answer = rag.ask(prompt[i])
